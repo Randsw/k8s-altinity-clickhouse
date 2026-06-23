@@ -10,7 +10,7 @@ RUN go mod download
 # Copy the go source
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o click-app main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o click-app main.go handlers.go repository.go config.go
 
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
