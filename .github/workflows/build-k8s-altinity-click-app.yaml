@@ -1,0 +1,53 @@
+name: Build and Push k8s-altinity app
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'app/**.go'
+      - 'app/**.mod'
+      - 'app/**.sum'
+      - 'app/Dockerfile'
+permissions:
+    contents: read
+    packages: write
+jobs:
+    Build:
+      # The type of runner that the job will run on
+      runs-on: ubuntu-latest
+      steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure git to trust the workspace despite the different owner
+        run: git config --global --add safe.directory $(realpath .)
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/randsw/k8s-altinity-click
+          flavor: latest=true
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Github Packages
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build image and push to GitHub Container Registry
+        uses: docker/build-push-action@v6
+        with:
+          # relative path to the place where source code with Dockerfile is located
+          context: app/
+          # Note: tags has to be all lower-case
+          tags: ghcr.io/randsw/k8s-altinity-click:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true
