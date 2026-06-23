@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+# set -e
 
 helm upgrade --install --wait --timeout 35m --atomic --namespace clickhouse --create-namespace  \
   --repo https://helm.altinity.com clickhouse-operator altinity-clickhouse-operator --values - <<EOF
@@ -10,6 +10,12 @@ dashboards:
   enabled: true
   additionalLabels:
     grafana_dashboard: "1"
+configs:
+  files:
+    config.yaml:
+      watch:
+        namespaces:
+          include: [".*"]
 EOF
 
 kubectl create namespace app || true
@@ -33,6 +39,12 @@ metadata:
   namespace: app
 spec:
   configuration:
+    settings:
+      prometheus/endpoint: /metrics
+      prometheus/port: 7000
+      prometheus/metrics: true
+      prometheus/events: true
+      prometheus/asynchronous_metrics: true
     clusters:
       - name: "keeper"
         layout:
@@ -40,18 +52,51 @@ spec:
   templates:
     podTemplates:
       - name: keeper-pod
+        metadata:
+          labels:
+            app: clickhouse-keeper
+          annotations:
+            prometheus.io/port: "7000"
+            prometheus.io/scrape: "true"
         spec:
           containers:
             - name: clickhouse-keeper
               image: altinity/clickhouse-keeper:25.8.16.10002.altinitystable
+              ports:
+                - name: chk-metrics
+                  containerPort: 7000 
     volumeClaimTemplates:
-      - name: keeper-data-template
+      - name: data-storage-template
         spec:
           accessModes:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 1Gi # Хранилище для логов координатора
+              storage: 1Gi
+EOF
+
+cat << EOF | kubectl apply -f -
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: clickhouse-keeper-metrics
+  namespace: app
+  labels:
+    app.kubernetes.io/part-of: vm-operator
+    app.kubernetes.io/instance: vm-pod-scrape
+spec:
+  selector:
+    matchLabels:
+      app: clickhouse-keeper
+  podMetricsEndpoints:
+    - port: chk-metrics # please update the port if changed in the clickhouse keeper config
+      relabelConfigs:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod_name
+        - sourceLabels: [__meta_kubernetes_pod_container_name]
+          targetLabel: container_name
 EOF
 
 cat << EOF | kubectl apply -f -
@@ -78,10 +123,8 @@ spec:
         quota: default
         grants:
           - "GRANT ALL ON cart.*"
-    databases:
-      - name: cart
     clusters:
-      - name: "cart_shop_cluster"
+      - name: "cart-shop"
         layout:
           shardsCount: 1
           replicasCount: 3

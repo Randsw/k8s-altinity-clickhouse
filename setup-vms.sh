@@ -14,6 +14,9 @@ vmsingle:
       - single.kind.cluster
     ingressClassName: nginx
 vmagent:
+  spec:
+    externalLabels:
+      cluster: "kind-local-cluster"
   ingress:
     enabled: true
     hosts:
