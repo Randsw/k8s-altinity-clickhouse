@@ -1,0 +1,6 @@
+.ssl/
+.terraform/
+*.tfstate*
+*.lock*
+tmp*
+*.zip

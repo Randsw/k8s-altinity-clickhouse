@@ -145,7 +145,10 @@ metallb(){
   local METALLB_END=$(subnet_to_ip $KIND_SUBNET 255.250)
 
   helm upgrade --install --wait --timeout 35m --atomic --namespace metallb-system --create-namespace \
-    --repo https://metallb.github.io/metallb metallb metallb
+    --repo https://metallb.github.io/metallb metallb metallb --values - <<EOF
+  frrk8s:
+    enabled: false
+EOF
 
   kubectl apply -f - <<EOF
 apiVersion: metallb.io/v1beta1
