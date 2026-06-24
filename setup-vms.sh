@@ -19,9 +19,9 @@ data:
         type: prometheus
         access: proxy
         url: http://vmsingle-vm-victoria-metrics-k8s-stack.victoria-metrics:8428
-        isDefault: true
+        isDefault: false
         editable: true
-        orgId: 10
+        orgId: 1
         uid: prometheus
 EOF
 
@@ -39,7 +39,7 @@ vmsingle:
 vmagent:
   spec:
     externalLabels:
-      cluster: "kind-local-cluster"
+      cluster: "mycluster"
   ingress:
     enabled: true
     hosts:
@@ -56,9 +56,13 @@ grafana:
   enabled: true
   sidecar:
     datasources:
+      enabled: true
       searchNamespace: ALL
     dashboards:
+      enabled: true
       searchNamespace: ALL
+    provider:
+      allowUiUpdates: true
   ingress:
     enabled: true
     ingressClassName: nginx
@@ -66,6 +70,11 @@ grafana:
         - grafana.kind.cluster
   plugins:
     - victoriametrics-metrics-datasource
+  serviceMonitor:
+    enabled: true
+    relabelings:
+      - targetLabel: cluster
+        replacement: mycluster
 kubeEtcd:
   enabled: true
   service:
@@ -100,7 +109,7 @@ kubeScheduler:
     # spec for VMServiceScrape crd 
     # https://github.com/VictoriaMetrics/operator/blob/master/docs/api.MD#vmservicescrapespec
     spec:
-      jobLabel: jobLabel
+      jobLabel: app.kubernetes.io/component
       endpoints:
         - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
           # bearerTokenSecret:
@@ -117,7 +126,7 @@ kubeControllerManager:
     # spec for VMServiceScrape crd 
     # https://github.com/VictoriaMetrics/operator/blob/master/docs/api.MD#vmservicescrapespec
     spec:
-      jobLabel: jobLabel
+      jobLabel: app.kubernetes.io/component
       endpoints:
         - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
           # bearerTokenSecret:
