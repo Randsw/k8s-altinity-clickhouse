@@ -6,7 +6,7 @@ metadata:
   labels:
     app: clicker
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: clicker
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: clicker
-        image: clicker:latest
+        image: ghcr.io/randsw/k8s-altinity-click:latest
         ports:
         - containerPort: 8080
         env:
@@ -25,7 +25,7 @@ spec:
           value: "8080"
         # Optional full ClickHouse URL, can be set via secret
         - name: CLICKHOUSE_HOST
-          value: chi-cart-clickhouse-cluster-cart-shop-cluster:9000
+          value: clickhouse-cart-clickhouse-cluster:9000
         # Added env vars for ClickHouse authentication
         - name: CLICKHOUSE_USER
           value: cart_user

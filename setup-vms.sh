@@ -2,6 +2,29 @@
 
 set -e
 
+cat << EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vms-datasource
+  namespace: victoria-metrics
+  labels:
+    grafana_datasource: "1"
+    namespace: victoria-metrics
+data:
+  vms-datasource.yaml: |-
+    apiVersion: 1
+    datasources:
+      - name: prometheus
+        type: prometheus
+        access: proxy
+        url: http://vmsingle-vm-victoria-metrics-k8s-stack.victoria-metrics:8428
+        isDefault: true
+        editable: true
+        orgId: 10
+        uid: prometheus
+EOF
+
 helm upgrade --install --wait --timeout 35m --atomic --namespace victoria-metrics --create-namespace  \
   --repo https://victoriametrics.github.io/helm-charts vm victoria-metrics-k8s-stack --values - <<EOF
 victoria-metrics-operator:
