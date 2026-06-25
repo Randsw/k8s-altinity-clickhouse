@@ -61,6 +61,7 @@ grafana:
     dashboards:
       enabled: true
       searchNamespace: ALL
+      multicluster: true
     provider:
       allowUiUpdates: true
   ingress:
