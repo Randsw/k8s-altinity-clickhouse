@@ -2,97 +2,104 @@
 
 ## Overview
 
-This repository shows how to **deploy a ClickHouse cluster** on a local Kubernetes cluster using **Kind** and the **Altinity ClickHouse Operator**. It also includes a **VictoriaMetrics stack** for monitoring ClickHouse metrics. The focus is on the Kubernetes resources and operator configuration; the example Go application is provided only as a minimal client.
+This repository provides a complete, production-ready blueprint for deploying a **ClickHouse cluster** on a Kubernetes environment using the **Altinity ClickHouse Operator**.
 
-## Prerequisites
+To ensure complete observability, the project includes a fully configured **VictoriaMetrics stack** (Grafana + VictoriaMetrics Operator) tailored to monitor ClickHouse performance metrics out of the box.
 
-Ensure the following are installed and updated for 2026:
+### Architecture Quick Look
 
-- **Docker** (Engine or Desktop)
-- **kubectl**
-- **Kind CLI**
-- **Helm** (v3.x+)
+* **Infrastructure**: 1 Control Plane + 3 Worker nodes (Kind) with MetalLB for LoadBalancer support.
+* **Storage & Coordination**: ClickHouse Keeper for replication management.
+* **Database**: 1 Shard × 3 Replicas setup with a pre-configured `cart` database and dedicated user permissions.
+* **App Layer**: A minimal Go client to generate, display, and aggregate mock data.
 
 ---
 
-## Deploy
+## Prerequisites
 
-### 1. Cluster Infrastructure Setup
+Ensure the following tools are installed and updated:
 
-Initialize the environment by running the setup script. This creates a multi-node cluster (1 Control Plane, 3 Workers) pre-configured with MetaLB (LoadBalancer support) and local image registries.
+* **Docker** (Engine or Desktop)
+* **kubectl**
+* **Kind CLI**
+* **Helm** (v3.x+)
+
+---
+
+## Getting Started & Deployment
+
+### 1. Provision the Kubernetes Infrastructure
+
+Initialize your local multi-node cluster. This script creates the nodes, sets up a local Docker registry integration, and configures MetalLB for external IP routing.
 
 ```bash
 ./cluster-setup.sh
 ```
 
-### 2. Deploy VictoriaMetrics Kubernetes stack with Grafana
+### 2. Deploy the VictoriaMetrics Stack & Grafana
 
-Run `./setup-vms.sh`
-
-#### Get grafana password
-
-Login - admin
-
-Password:
-
-`kubectl get secret --namespace victoria-metrics vm-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo`
-
-### 3. Deploy Altinity ClickHouse Operator
-
-Run `./setup-click.sh`
-
-### 4. Run example application
-
-The repository also contains a minimal Go client (`app/`) that can be used to verify connectivity, but the primary purpose of this project is the Kubernetes and monitoring setup.
-
-Run `kubectl apply -f ./k8s/`
-
-Open in browser `http://app.kind.cluster/generate`
-
-## Detailed Steps
-
-### 1. Create a Kind Cluster
-
-The `cluster-setup.sh` script wraps Kind commands:
+Install the monitoring infrastructure, including cluster-wide Kubernetes dashboards and multi-cluster viewing support.
 
 ```bash
-./cluster-setup.sh    # creates a cluster
+./setup-vms.sh
 ```
 
-It also configures the local Docker registry so that the built Go application image can be loaded into Kind without pushing to an external registry.
+#### Accessing Grafana
 
-### 2. Install Victoria Metrics K8s stack
+The default login username is `admin`. Retrieve your auto-generated password by running:
 
-`setup-click.sh` performs the following actions:
+```bash
+kubectl get secret --namespace victoria-metrics vm-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+```
 
-1. Installs the Victoria Metrics K8s stack via Helm
-2. Install default kubernetes dashboards
-3. Enable multicluster dashboards in Grafana
+### 3. Deploy Altinity ClickHouse Operator & Cluster
 
-### 3. Install Altinity ClickHouse Operator
+Deploy the operator, spin up the `ClickHouseKeeperInstallation` for coordination, and initialize the ClickHouse cluster (1 shard, 3 replicas). This step also auto-provisions the `cart` database and `cart-user`.
 
-`setup-click.sh` performs the following actions:
+```bash
+./setup-click.sh
+```
 
-1. Installs the Altinity ClickHouse Operator via Helm.
-2. Applies the `ClickKeeperHouseInstallation` CRD.
-3. Creates a `ClickHouseInstallation` resource that defines a ClickHouse cluster with 1 shards and 3 replicas per shard.
-4. Create `cart` database and user named `cart-user` with grants on `cart` database
+### 4. Launch the Example Go Application
 
-### 4. Example applicattion
+Deploy the application workloads (Deployment, Service, and Ingress resources) to test end-to-end database connectivity.
 
-Example application consist of:
+```bash
+kubectl apply -f ./k8s/
+```
 
-1. Deployment
-2. Service
-3. Ingress
+---
 
-Run `http://app.kind.cluster/generate`. This is create table in clickhouse and fill it with example data.
-Generated data can be seen at `http://app.kind.cluster/show`.
-Run `http://app.kind.cluster/calc` and see aggregated data
+## Verifying the Setup
+
+Once all pods are running, you can interact with the Go application via your browser using the following endpoints:
+
+* **Seed Data**: `http://app.kind.cluster/generate`  
+  *Initializes the target ClickHouse tables and populates them with sample data.*
+* **View Data**: `http://app.kind.cluster/show`  
+  *Fetches and prints raw rows directly from the ClickHouse cluster.*
+* **Aggregate Data**: `http://app.kind.cluster/calc`  
+  *Executes an analytical aggregation query over the generated dataset.*
+
+---
+
+## Project Structure
+
+* `/app` - Minimal Go client source code and Dockerfile.
+* `app/k8s` - Kubernetes manifests for the application layer (Deployment, Service, Ingress).
+* `cluster-setup.sh` - Kind cluster bootstrap and network setup automation.
+* `setup-vms.sh` - Helm charts and configuration for VictoriaMetrics/Grafana.
+* `setup-click.sh` - Altinity Operator, Keeper, and ClickHouse Custom Resources.
+
+---
 
 ## Contributing
 
-Feel free to open issues or submit pull requests. Contributions that add more realistic workloads, improve monitoring, or extend the operator configuration are welcome.
+Contributions are highly welcome! Feel free to open issues or submit pull requests. Areas for expansion include:
+
+* Introducing realistic, high-throughput data workloads.
+* Adding custom Grafana dashboards for deep ClickHouse engine metrics.
+* Expanding operator configurations (e.g., advanced storage classes, volume templates).
 
 ## License
 
