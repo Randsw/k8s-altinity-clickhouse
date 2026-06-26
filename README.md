@@ -65,8 +65,14 @@ Deploy the operator, spin up the `ClickHouseKeeperInstallation` for coordination
 Deploy the application workloads (Deployment, Service, and Ingress resources) to test end-to-end database connectivity.
 
 ```bash
-kubectl apply -f ./k8s/
+kubectl apply -f ./app/k8s/
 ```
+
+### 5. Add Clickhouse cluster grafana Dashboard
+
+Import the following IDs into Grafana:
+
+14192: ClickHouse
 
 ---
 
