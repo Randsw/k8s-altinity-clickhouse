@@ -1,4 +1,4 @@
-# k8s-altinity-click
+# Deploy ClickHouse cluster in Kubernetes using Altinity ClickHouse Operator
 
 ## Overview
 
