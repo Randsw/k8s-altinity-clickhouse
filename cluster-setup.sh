@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 # CONSTANTS
 
+readonly KIND_CLUSTER_NAME=kind
+readonly KIND_NETWORK=kind
 readonly KIND_NODE_IMAGE=kindest/node:v1.32.5
+readonly HOSTS_MARKER='# k8s-altinity-click'
+readonly HOSTS_NAMES='app.kind.cluster grafana.kind.cluster alertmanager.kind.cluster agent.kind.cluster single.kind.cluster'
+readonly LB_IP_ATTEMPTS=60
+readonly LB_IP_INTERVAL=2
 
 # FUNCTIONS
 
 log(){
   echo "---------------------------------------------------------------------------------------"
-  echo $1
+  echo "$*"
   echo "---------------------------------------------------------------------------------------"
+}
+
+require(){
+  local CMD
+  for CMD in "$@"; do
+    if ! command -v "$CMD" >/dev/null 2>&1
+    then
+      echo "Required command not found: $CMD" >&2
+      exit 1
+    fi
+  done
 }
 
 wait_ready(){
@@ -21,29 +38,29 @@ wait_ready(){
 
   log "WAIT $NAME ($TIMEOUT) ..."
 
-  kubectl wait -A --timeout=$TIMEOUT --for=condition=ready $NAME $SELECTOR
+  kubectl wait -A --timeout="$TIMEOUT" --for=condition=ready "$NAME" "$SELECTOR"
 }
 
 wait_pods_ready(){
   local TIMEOUT=${1:-5m}
 
-  wait_ready pods $TIMEOUT --field-selector=status.phase!=Succeeded
+  wait_ready pods "$TIMEOUT" --field-selector=status.phase!=Succeeded
 }
 
 wait_nodes_ready(){
   local TIMEOUT=${1:-5m}
 
-  wait_ready nodes $TIMEOUT
+  wait_ready nodes "$TIMEOUT" --all
 }
 
 network(){
-  local NAME=${1:-kind}
+  local NAME=${1:-$KIND_NETWORK}
 
-  log "NETWORK (kind) ..."
+  log "NETWORK ($NAME) ..."
 
-  if [ -z $(docker network ls --filter name=^$NAME$ --format="{{ .Name }}") ]
-  then 
-    docker network create --ipv6=false $NAME
+  if [ -z "$(docker network ls --filter "name=^${NAME}$" --format '{{ .Name }}')" ]
+  then
+    docker network create --ipv6=false "$NAME"
     echo "Network $NAME created"
   else
     echo "Network $NAME already exists, skipping"
@@ -54,9 +71,10 @@ proxy(){
   local NAME=$1
   local TARGET=$2
 
-  if [ -z $(docker ps --filter name=$NAME --format="{{ .Names }}") ]
+  if [ -z "$(docker ps --filter "name=^${NAME}$" --format '{{ .Names }}')" ]
   then
-    docker run -d --name $NAME --restart=always --net=kind -e REGISTRY_PROXY_REMOTEURL=$TARGET registry:2
+    docker run -d --name "$NAME" --restart=always --net="$KIND_NETWORK" \
+      -e REGISTRY_PROXY_REMOTEURL="$TARGET" registry:2
     echo "Proxy $NAME (-> $TARGET) created"
   else
     echo "Proxy $NAME already exists, skipping"
@@ -75,25 +93,36 @@ proxies(){
 }
 
 get_service_lb_ip(){
-  kubectl get svc -n $1 $2 -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  kubectl get svc -n "$1" "$2" -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 }
 
 get_subnet(){
-  docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' $1
+  docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' "$1"
 }
 
 subnet_to_ip(){
-  echo $1 | sed "s@0.0/16@$2@"
+  local SUBNET=${1:?subnet required}
+  local HOST=${2:?host octets required}
+  local NETWORK=${SUBNET%/*}
+  local PREFIX=${SUBNET#*/}
+
+  if [ "$PREFIX" -ne 16 ]
+  then
+    echo "Unsupported subnet prefix /$PREFIX (expected /16): $SUBNET" >&2
+    return 1
+  fi
+
+  echo "${NETWORK%.0.0}.${HOST}"
 }
 
 cluster(){
-  local NAME=${1:-kind}
+  local NAME=${1:-$KIND_CLUSTER_NAME}
 
   log "CLUSTER ..."
 
-  docker pull $KIND_NODE_IMAGE
+  docker pull "$KIND_NODE_IMAGE"
 
-  kind create cluster --name $NAME --image $KIND_NODE_IMAGE --config - <<EOF
+  kind create cluster --name "$NAME" --image "$KIND_NODE_IMAGE" --config - <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 kubeadmConfigPatches:
@@ -140,14 +169,18 @@ EOF
 metallb(){
   log "METALLB ..."
 
-  local KIND_SUBNET=$(get_subnet kind)
-  local METALLB_START=$(subnet_to_ip $KIND_SUBNET 255.200)
-  local METALLB_END=$(subnet_to_ip $KIND_SUBNET 255.250)
+  local KIND_SUBNET
+  local METALLB_START
+  local METALLB_END
+
+  KIND_SUBNET=$(get_subnet "$KIND_NETWORK")
+  METALLB_START=$(subnet_to_ip "$KIND_SUBNET" 255.200)
+  METALLB_END=$(subnet_to_ip "$KIND_SUBNET" 255.250)
 
   helm upgrade --install --wait --timeout 35m --atomic --namespace metallb-system --create-namespace \
     --repo https://metallb.github.io/metallb metallb metallb --values - <<EOF
-  frrk8s:
-    enabled: false
+frrk8s:
+  enabled: false
 EOF
 
   kubectl apply -f - <<EOF
@@ -173,7 +206,7 @@ EOF
 
 prometheus_crd(){
   kubectl create namespace victoria-metrics || true
-  
+
   helm upgrade --install --wait --timeout 35m --atomic --namespace victoria-metrics \
   --repo https://prometheus-community.github.io/helm-charts prometheus-crd prometheus-operator-crds
 }
@@ -230,25 +263,49 @@ EOF
 
 dnsmasq(){
   log "Hosts ..."
-  local INGRESS_LB_IP=$(get_service_lb_ip ingress-nginx ingress-nginx-controller)
-  echo "$INGRESS_LB_IP app.kind.cluster grafana.kind.cluster alertmanager.kind.cluster agent.kind.cluster single.kind.cluster" | sudo tee -a /etc/hosts
+
+  local INGRESS_LB_IP=""
+  local ATTEMPT
+
+  for ATTEMPT in $(seq 1 "$LB_IP_ATTEMPTS")
+  do
+    INGRESS_LB_IP=$(get_service_lb_ip ingress-nginx ingress-nginx-controller)
+    if [ -n "$INGRESS_LB_IP" ]
+    then
+      break
+    fi
+    sleep "$LB_IP_INTERVAL"
+  done
+
+  if [ -z "$INGRESS_LB_IP" ]
+  then
+    echo "Could not determine ingress-nginx LoadBalancer IP" >&2
+    return 1
+  fi
+
+  sudo sed -i "\|${HOSTS_MARKER}|d" /etc/hosts
+  echo "$INGRESS_LB_IP $HOSTS_NAMES $HOSTS_MARKER" | sudo tee -a /etc/hosts
 }
 
 cleanup(){
   log "CLEANUP ..."
-  sudo sed -i '/app.kind.cluster grafana.kind.cluster alertmanager.kind.cluster agent.kind.cluster single.kind.cluster"$/d' /etc/hosts
-  kind delete cluster || true
+  sudo sed -i "\|${HOSTS_MARKER}|d" /etc/hosts
+  kind delete cluster --name "$KIND_CLUSTER_NAME" || true
 }
 
 # RUN
+
+require docker kubectl kind helm
 
 cleanup
 network
 proxies
 cluster
+wait_nodes_ready
 metallb
 prometheus_crd
 ingress
+wait_pods_ready
 dnsmasq
 
 # DONE
